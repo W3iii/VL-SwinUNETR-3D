@@ -1,100 +1,126 @@
-Create a PyTorch model for 3D medical image segmentation that combines MONAI SwinUNETR v2 with LAVT-style language-aware fusion.
+Create a PyTorch research prototype for 3D medical image segmentation that integrates MONAI SwinUNETR v2 with LAVT-style multi-stage language-aware fusion.
 
-Model goal:
-Build a 3D vision-language segmentation model for medical images, where the visual backbone is SwinUNETR v2 and the language encoder is Medical BERT.
+Goal
+Build a 3D vision-language segmentation model where:
+- visual backbone = MONAI SwinUNETR (use_v2=True)
+- language encoder = Medical BERT
+- language fusion = LAVT-style multi-stage fusion at every Swin stage
+
+Inputs
+- image: (B, C, H, W, D)
+- input_ids: (B, L)
+- attention_mask: (B, L)
+
+Language Encoder
+Implement a MedicalTextEncoder using HuggingFace Transformers.
+
+Use this checkpoint:
+microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext
 
 Requirements:
+- return token embeddings of shape (B, L, T)
+- add optional freeze_bert flag
+- allow projection to match visual feature channel size
 
-1. Use MONAI's SwinUNETR as the visual backbone with:
-   - use_v2=True
-   - support for 3D medical image segmentation
-   - input image shape: (B, C, H, W, D)
+Fusion Design (LAVT-style)
+Implement multi-stage language-aware fusion.
 
-2. Use a Medical BERT model as the text encoder.
-   - Use HuggingFace Transformers.
-   - The text encoder should be loaded from a medical-domain BERT checkpoint.
-   - Example: PubMedBERT, Bio_ClinicalBERT, or another medical BERT model.
-   - Input text should be tokenized text prompts such as:
-     "breast tumor"
-     "breast lesion"
-     "tumor in breast CT"
-   - The text input format should include:
-     input_ids
-     attention_mask
+Language fusion must be applied at every Swin encoder stage:
+- stage 0
+- stage 1
+- stage 2
+- stage 3
+- stage 4 / bottleneck
 
-3. The model should accept:
-   - image tensor: (B, C, H, W, D)
-   - input_ids: (B, L)
-   - attention_mask: (B, L)
+Do NOT implement only bottleneck fusion.
+Do NOT simplify to FiLM or gating.
 
-4. Encode text using Medical BERT:
-   - obtain token-level embeddings of shape (B, L, T)
-   - optionally project them into the same channel dimension as visual features
+Fusion Module
+Implement:
 
-5. Implement LAVT-style language-aware fusion:
-   - extract multi-scale visual features from the SwinUNETR encoder
-   - for each selected visual stage, flatten 3D feature maps into visual tokens
-   - apply cross-attention between visual tokens and Medical BERT text tokens
-   - fuse the attended language information back into the visual features
-   - reshape fused tokens back to 3D feature maps
+LanguageVisionFusion(nn.Module)
 
-6. Implement a reusable fusion module:
-   class LanguageVisionFusion(nn.Module)
-   - inputs:
-       visual_tokens: (B, N, C)
-       text_tokens: (B, L, C)
-       text_padding_mask: (B, L)
-   - use nn.MultiheadAttention for cross-attention
-   - return fused visual tokens: (B, N, C)
+Inputs
+- visual feature map: (B, C, H, W, D)
+- text tokens: (B, L, C)
+- text_padding_mask: (B, L)
 
-7. The architecture should contain these classes:
-   - MedicalTextEncoder
-   - LanguageVisionFusion
-   - VL_SwinUNETR3D
+Steps
+1. flatten visual features to tokens
+   (B, C, H, W, D) -> (B, N, C)
 
-8. MedicalTextEncoder should:
-   - wrap a HuggingFace medical BERT model
-   - output token embeddings
-   - optionally freeze or unfreeze BERT parameters with a flag
-   - Use microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext as the Medical BERT encoder.
+2. apply multi-head cross attention
+   visual tokens attend to text tokens
 
-9. VL_SwinUNETR3D should:
-   - use SwinUNETR v2 as backbone
-   - extract hierarchical encoder features
-   - apply language fusion at multiple encoder stages
-   - pass fused features into the decoder
-   - output final segmentation logits
+3. fuse language-aware information
 
-10. Important implementation details:
-   - flatten 3D feature maps into tokens before cross-attention
-   - restore fused tokens back to 3D shape after attention
-   - keep code modular and readable
-   - make the code suitable for research experiments
-   - include shape comments for major tensors
-   - Do not modify MONAI source code directly. Instead, create a custom model that reuses SwinUNETR internal modules and rewrites the forward pass for multi-stage language fusion.
+4. reshape tokens back to 3D feature maps
 
-11. The forward function should be:
+Use:
+nn.MultiheadAttention(batch_first=True)
 
-   def forward(self, image, input_ids, attention_mask):
-       """
-       image: (B, C, H, W, D)
-       input_ids: (B, L)
-       attention_mask: (B, L)
-       returns: segmentation logits
-       """
-       ...
+Add:
+- residual connection
+- layer normalization
 
-12. Use only:
-   - PyTorch
-   - MONAI
-   - HuggingFace Transformers
+Main Model
+Implement:
 
-13. Please generate complete code with:
-   - imports
-   - class definitions
-   - forward methods
-   - tensor reshape logic
-   - comments explaining each major step
+VL_SwinUNETR3D(nn.Module)
 
-Focus on a clean research prototype, not production optimization.
-make sure adding git commit and referring commit messeage 
+Pipeline
+image -> SwinUNETR encoder -> hierarchical visual features
+text -> Medical BERT -> text tokens
+
+Apply LanguageVisionFusion at each Swin stage feature.
+
+Pass fused multi-scale features into the SwinUNETR decoder.
+
+Output:
+segmentation logits
+
+Forward API
+
+def forward(self, image, input_ids, attention_mask):
+    """
+    image: (B, C, H, W, D)
+    input_ids: (B, L)
+    attention_mask: (B, L)
+    returns: segmentation logits
+    """
+
+Implementation Rules
+
+- use PyTorch
+- use MONAI
+- use HuggingFace Transformers
+
+Important Constraint
+
+Do NOT modify MONAI package source files.
+Do NOT edit installed MONAI library code.
+
+Instead:
+- build a custom model that reuses MONAI SwinUNETR internal modules
+- rewrite the SwinUNETR forward logic inside the custom class
+- insert language fusion at each Swin stage
+
+All custom code must live in a new file such as:
+models/vl_swinunetr3d.py
+
+Code Requirements
+
+Generate complete research prototype code including:
+- imports
+- class definitions
+- forward methods
+- reshape logic for 3D tokens
+- comments explaining tensor shapes
+
+Git
+
+Also provide:
+- a suggested git commit
+- a concise commit message describing the implementation
+
+Reuse SwinUNETR.swinViT outputs and encoder features to perform multi-stage fusion before decoder stages.
