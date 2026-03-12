@@ -1,0 +1,84 @@
+# VL-SwinUNETR-3D – LDCT Breast 3D Segmentation
+# Training configuration (adapted from BTCV SwinUNETR)
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+data:
+  data_dir: ./data/breast_ct          # root directory with imagesTr/, labelsTr/
+  json_list: dataset.json             # decathlon-style JSON manifest
+  cache_num: 24                       # number of samples to cache in RAM
+  cache_rate: 1.0
+  workers: 4
+  use_normal_dataset: false           # true = monai.Dataset, false = CacheDataset
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model:
+  img_size: [96, 96, 96]
+  in_channels: 1                      # CT = single channel
+  out_channels: 2                     # 0=background, 1=breast tumor/lesion
+  feature_size: 48                    # SwinUNETR base (62M params)
+  bert_model_name: microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext
+  freeze_bert: false
+  num_attn_heads: 8
+  use_checkpoint: true                # gradient checkpointing for memory saving
+  dropout_path_rate: 0.0
+
+# ── Text prompts ──────────────────────────────────────────────────────────────
+text:
+  max_length: 32                      # tokenizer max sequence length
+  default_prompts:                    # used when JSON entry has no "text" field
+    - "breast tumor"
+    - "breast lesion"
+    - "tumor in breast CT"
+    - "malignant breast mass"
+    - "breast cancer segmentation"
+
+# ── Augmentation / preprocessing ──────────────────────────────────────────────
+augmentation:
+  # LDCT breast soft-tissue window
+  a_min: -200.0
+  a_max:  300.0
+  b_min:  0.0
+  b_max:  1.0
+  # Voxel spacing (mm)  – resample to isotropic-ish
+  space_x: 0.7
+  space_y: 0.7
+  space_z: 1.5
+  # Random crop ROI
+  roi_x: 96
+  roi_y: 96
+  roi_z: 96
+  # Augmentation probabilities
+  RandFlipd_prob:           0.2
+  RandRotate90d_prob:       0.2
+  RandScaleIntensityd_prob: 0.1
+  RandShiftIntensityd_prob: 0.1
+
+# ── Training ──────────────────────────────────────────────────────────────────
+training:
+  max_epochs:   500
+  batch_size:   1
+  sw_batch_size: 4                    # sliding-window inference batch size
+  val_every:    50                    # validate every N epochs
+  infer_overlap: 0.5
+
+  optim_name:    adamw
+  optim_lr:      1.0e-4
+  reg_weight:    1.0e-5
+  momentum:      0.99                 # for SGD only
+
+  lrschedule:    warmup_cosine        # warmup_cosine | cosine_anneal | none
+  warmup_epochs: 50
+
+  amp: true                           # automatic mixed precision
+  save_checkpoint: true
+  logdir: ./runs/vl_swinunetr3d
+
+  smooth_nr: 0.0
+  smooth_dr: 1.0e-6
+  squared_dice: false
+
+# ── Distributed (optional) ────────────────────────────────────────────────────
+distributed:
+  enabled: false
+  dist_url:     tcp://127.0.0.1:23456
+  dist_backend: nccl
